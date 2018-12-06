@@ -14,70 +14,20 @@ function _command_exists ()
   type "$1" &> /dev/null ;
 }
 
-# Helper function listing various enable-able files to be sourced
-# The files need to be sourced in global scope to preserve scope of 'declare'
-function _list_bash_it_files() {
-  local subdirectory="$1"
-  pushd "${BASH_IT}" >/dev/null
-
-  if [ -d "./${subdirectory}/enabled" ]
-  then
-    local FILES="./${subdirectory}/enabled/*.bash"
-    local _bash_it_config_file
-
-    for _bash_it_config_file in $FILES
-    do
-      if [ -e "${_bash_it_config_file}" ]; then
-        printf "$_bash_it_config_file\n"
-      fi
-    done
-  fi
-
-  popd >/dev/null
-}
-
-function _list_global_bash_it_files() {
-  local family="$1"
-  pushd "${BASH_IT}" >/dev/null
-
-  # In the new structure
-  if [ -d "./enabled" ]
-  then
-    local FILES="./enabled/*$family.bash"
-    local _bash_it_config_file
-
-    for _bash_it_config_file in $FILES
-    do
-      if [ -e "${_bash_it_config_file}" ]; then
-        printf "$_bash_it_config_file\n"
-      fi
-    done
-  fi
-
-  popd >/dev/null
-}
-
 function _make_reload_alias() {
-  local global_family="$1"
-  local subdirectory="$2"
-
-  printf %s '
-  for _bash_it_config_file in $(_list_global_bash_it_files '"$global_family"'); do
-    . "${BASH_IT}/$_bash_it_config_file"
-  done ;\
-  for _bash_it_config_file in $(_list_bash_it_files '"$subdirectory"'); do
-    . "${BASH_IT}/$_bash_it_config_file"
-  done ;\
-  unset _bash_it_config_file'
+  echo "source \${BASH_IT}/scripts/reloader.bash ${1} ${2}"
 }
 
 # Alias for reloading aliases
+# shellcheck disable=SC2139
 alias reload_aliases="$(_make_reload_alias alias aliases)"
 
 # Alias for reloading auto-completion
+# shellcheck disable=SC2139
 alias reload_completion="$(_make_reload_alias completion completion)"
 
 # Alias for reloading plugins
+# shellcheck disable=SC2139
 alias reload_plugins="$(_make_reload_alias plugin plugins)"
 
 bash-it ()
@@ -203,18 +153,40 @@ _bash-it_update() {
   status="$(git rev-list master..${BASH_IT_REMOTE}/master 2> /dev/null)"
 
   if [[ -n "${status}" ]]; then
-    git pull --rebase &> /dev/null
-    if [[ $? -eq 0 ]]; then
-      echo "Bash-it successfully updated."
-      echo ""
-      echo "Migrating your installation to the latest version now..."
-      _bash-it-migrate
-      echo ""
-      echo "All done, enjoy!"
-      bash-it reload
-    else
-      echo "Error updating Bash-it, please, check if your Bash-it installation folder (${BASH_IT}) is clean."
-    fi
+
+    for i in $(git rev-list --merges --first-parent master..${BASH_IT_REMOTE}); do
+      num_of_lines=$(git log -1 --format=%B $i | awk 'NF' | wc -l)
+      if [ $num_of_lines -eq 1 ]; then
+        description="%s"
+      else
+        description="%b"
+      fi
+      git log --format="%h: $description (%an)" -1 $i
+    done
+    echo ""
+    read -e -n 1 -p "Would you like to update to $(git log -1 --format=%h origin/master)? [Y/n] " RESP
+    case $RESP in
+      [yY]|"")
+        git pull --rebase &> /dev/null
+        if [[ $? -eq 0 ]]; then
+          echo "Bash-it successfully updated."
+          echo ""
+          echo "Migrating your installation to the latest version now..."
+          _bash-it-migrate
+          echo ""
+          echo "All done, enjoy!"
+          bash-it reload
+        else
+          echo "Error updating Bash-it, please, check if your Bash-it installation folder (${BASH_IT}) is clean."
+        fi
+        ;;
+      [nN])
+        echo "Not upgrading…"
+        ;;
+      *)
+        echo -e "\033[91mPlease choose y or n.\033[m"
+        ;;
+      esac
   else
     echo "Bash-it is up to date, nothing to do!"
   fi
